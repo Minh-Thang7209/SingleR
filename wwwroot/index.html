@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Загальний чат</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+
+        input {
+            padding: 10px;
+            margin: 5px 0;
+        }
+
+        button {
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+
+        .online {
+            color: green;
+        }
+
+        #messages, #onlineUsers {
+            padding-left: 25px;
+        }
+
+        #status {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Загальний чат</h1>
+
+    <p id="status">Підключення до сервера...</p>
+
+    <h2>Користувач</h2>
+    <input id="user" placeholder="Ваше ім'я">
+    <button id="join" disabled>Увійти в чат</button>
+
+    <h2>Користувачі онлайн</h2>
+    <ul id="onlineUsers"></ul>
+
+    <h2>Повідомлення</h2>
+    <input id="message" placeholder="Повідомлення">
+    <button id="send" disabled>Надіслати</button>
+
+    <ul id="messages"></ul>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+
+    <script>
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/chatHub")
+            .withAutomaticReconnect()
+            .build();
+
+        let currentUser = "";
+
+        const status = document.getElementById("status");
+        const userInput = document.getElementById("user");
+        const joinButton = document.getElementById("join");
+        const messageInput = document.getElementById("message");
+        const sendButton = document.getElementById("send");
+        const onlineUsers = document.getElementById("onlineUsers");
+        const messages = document.getElementById("messages");
+
+        connection.on("ReceiveMessage", function (user, message, time) {
+            const li = document.createElement("li");
+            li.textContent = `${user}: ${message} (${time})`;
+            messages.appendChild(li);
+        });
+
+        connection.on("UsersOnline", function (users) {
+            onlineUsers.replaceChildren();
+
+            users.forEach(function (user) {
+                const li = document.createElement("li");
+                li.textContent = user;
+                li.className = "online";
+                onlineUsers.appendChild(li);
+            });
+        });
+
+        async function startConnection() {
+            try {
+                await connection.start();
+
+                status.textContent = "З'єднання з сервером встановлено";
+                joinButton.disabled = false;
+            } catch (error) {
+                status.textContent = "Помилка підключення. Оновіть сторінку.";
+                console.error("SignalR connection error:", error);
+            }
+        }
+
+        joinButton.addEventListener("click", async function () {
+            const username = userInput.value.trim();
+
+            if (!username) {
+                alert("Введіть своє ім'я!");
+                return;
+            }
+
+            if (connection.state !== signalR.HubConnectionState.Connected) {
+                alert("Немає з'єднання із сервером. Оновіть сторінку.");
+                return;
+            }
+
+            try {
+                await connection.invoke("JoinChat", username);
+
+                currentUser = username;
+                userInput.disabled = true;
+                joinButton.disabled = true;
+                sendButton.disabled = false;
+
+                status.textContent = `Ви увійшли в чат як ${currentUser}`;
+            } catch (error) {
+                console.error("JoinChat error:", error);
+                alert("Не вдалося увійти в чат.");
+            }
+        });
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+
+            if (!currentUser) {
+                alert("Спочатку увійдіть у чат!");
+                return;
+            }
+
+            if (!message) {
+                return;
+            }
+
+            try {
+                await connection.invoke("SendMessage", currentUser, message);
+                messageInput.value = "";
+                messageInput.focus();
+            } catch (error) {
+                console.error("SendMessage error:", error);
+                alert("Не вдалося надіслати повідомлення.");
+            }
+        }
+
+        sendButton.addEventListener("click", sendMessage);
+
+        messageInput.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                sendMessage();
+            }
+        });
+
+        connection.onreconnected(async function () {
+            status.textContent = "З'єднання відновлено";
+
+            if (currentUser) {
+                try {
+                    await connection.invoke("JoinChat", currentUser);
+                } catch (error) {
+                    console.error("Rejoin error:", error);
+                }
+            }
+        });
+
+        connection.onclose(function () {
+            status.textContent = "З'єднання втрачено. Оновіть сторінку.";
+            joinButton.disabled = true;
+            sendButton.disabled = true;
+        });
+
+        startConnection();
+    </script>
+
+</body>
+</html>
